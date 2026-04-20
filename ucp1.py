@@ -13,120 +13,163 @@ import re
 # ==========================================
 # 1. KONEKSI MONGODB
 # ==========================================
-client = MongoClient('mongodb+srv://aryabagas23:puong206@praktikum.jofjat5.mongodb.net/?appName=praktikum', tlsCAFile=certifi.where())
+# Pastikan Anda sudah melakukan Drop Collection di MongoDB Anda sebelum menjalankan ini
+client = MongoClient('mongodb+srv://aryabagas23:puong206@praktikum.jofjat5.mongodb.net/?appName=praktikum')
 collections = client['ucp1']['CNBCIndo']
 
-def crawl_cnbc_hybrid():
+def crawl_cnbc_hybrid_final():
     print("🤖 Mempersiapkan Robot Browser (Selenium)...")
     
-    # Setting agar Chrome berjalan di "belakang layar" (Headless) tanpa membuka jendela mengganggu
+    # Konfigurasi Chrome Headless (berjalan di background)
     chrome_options = Options()
     chrome_options.add_argument('--headless=new') 
     chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--log-level=3') # Menyembunyikan pesan error internal browser
+    chrome_options.add_argument('--log-level=3') 
     
-    # Otomatis mendownload dan mencocokkan versi Chrome Anda
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
-    base_url = 'https://www.cnbcindonesia.com/search?query=Environmental+Sustainability'
+    # URL Pencarian
+    search_url = 'https://www.cnbcindonesia.com/search?query=Environmental+Sustainability'
     headers_requests = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
 
-    max_page = 3  # Kita coba 3 halaman dulu
-    page = 1
+    print("\n--- Memulai Proses Crawling ---")
+    print(f'📄 [SELENIUM] Membuka Halaman Pencarian...')
+    driver.get(search_url)
     
-    print("\n--- Memulai Proses Crawling Hybrid CNBC Indonesia ---")
+    print("⏳ Menunggu halaman dimuat...")
+    time.sleep(5) 
 
-    while page <= max_page:
-        search_url = f'{base_url}&p={page}'
-        print(f'\n📄 [SELENIUM] Membuka Halaman Pencarian {page}...')
-        
-        # Menyuruh robot Chrome membuka URL
-        driver.get(search_url)
-        
-        # INI KUNCINYA: Tunggu 5 detik agar JavaScript CNBC selesai menggambar kotak beritanya
-        print("⏳ Menunggu JavaScript memuat berita...")
-        time.sleep(5) 
-        
-        # Ambil HTML yang SUDAH MATANG (sudah dieksekusi JavaScript)
-        html_matang = driver.page_source
-        soup = BeautifulSoup(html_matang, 'html.parser')
-        
-        all_links = soup.find_all('a', href=True)
-        list_url_berita = []
+    # ==========================================
+    # LOGIKA SCROLLING OTOMATIS
+    # ==========================================
+    jumlah_scroll = 3 # Naikkan angka ini jika ingin mengambil data yang lebih lawas
+    
+    for i in range(jumlah_scroll):
+        print(f"⬇️ Melakukan scroll ke bawah ({i+1}/{jumlah_scroll}) untuk memuat artikel...")
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(4) 
 
-        # Menyaring tautan berita
-        for a in all_links:
-            href = a['href']
-            if "cnbcindonesia.com" in href and re.search(r'\d{8,}', href):
-                if href not in list_url_berita:
-                    list_url_berita.append(href)
+    # Ambil HTML setelah di-scroll penuh
+    html_matang = driver.page_source
+    soup = BeautifulSoup(html_matang, 'html.parser')
+    
+    all_links = soup.find_all('a', href=True)
+    list_url_berita = []
 
-        if not list_url_berita:
-            print('❌ Tidak ada link artikel ditemukan. Lanjut ke halaman berikutnya.')
-            page += 1
-            continue
+    # Filter khusus untuk URL berita CNBC
+    for a in all_links:
+        href = a['href']
+        if "cnbcindonesia.com" in href and re.search(r'\d{8,}', href):
+            if href not in list_url_berita:
+                list_url_berita.append(href)
 
-        print(f"🔍 Ditemukan {len(list_url_berita)} link artikel. Memulai ekstraksi isi (Requests)...")
+    driver.quit() # Robot Chrome ditutup karena link sudah di tangan
 
-        for url in list_url_berita:
-            try:
-                # Cek DB agar tidak dobel
-                if collections.find_one({'url': url}):
-                    print(f"⏩ Dilewati (Sudah ada): {url}")
-                    continue
+    if not list_url_berita:
+        print('❌ Tidak ada link artikel ditemukan. Coba cek kembali koneksi internet atau ubah keyword.')
+        return
 
-                # KITA KEMBALI MENGGUNAKAN REQUESTS UNTUK ISI BERITA AGAR SUPER CEPAT
-                isi_res = requests.get(url, headers=headers_requests, timeout=15)
-                isi_soup = BeautifulSoup(isi_res.text, 'html.parser')
+    print(f"🔍 Ditemukan TOTAL {len(list_url_berita)} link artikel. Memulai ekstraksi isi (Requests)...")
 
-                judul_tag = isi_soup.find('h1')
-                judul = judul_tag.text.strip() if judul_tag else 'Judul tidak ditemukan'
+    # ==========================================
+    # EKSTRAKSI ISI BERITA (REQUESTS)
+    # ==========================================
+    sukses_tersimpan = 0
 
-                tanggal_tag = isi_soup.find('div', class_='date')
-                tanggal = tanggal_tag.text.strip() if tanggal_tag else 'Tanggal tidak ditemukan'
+    for url in list_url_berita:
+        try:
+            # Cek Database
+            if collections.find_one({'url': url}):
+                print(f"⏩ Dilewati (Sudah ada di DB): {url}")
+                continue
 
-                author_tag = isi_soup.find('div', class_='author')
+            isi_res = requests.get(url, headers=headers_requests, timeout=15)
+            isi_soup = BeautifulSoup(isi_res.text, 'html.parser')
+
+            # 1. Judul
+            judul_tag = isi_soup.find('h1')
+            judul = judul_tag.text.strip() if judul_tag else 'Judul tidak ditemukan'
+
+            # 2. Author (Prioritas Meta Tag)
+            author_meta = isi_soup.find('meta', attrs={'name': 'author'}) or isi_soup.find('meta', attrs={'name': 'dtk:author'})
+            if author_meta and author_meta.get('content'):
+                author = author_meta['content'].strip()
+            else:
+                author_tag = isi_soup.find('div', class_='author') or isi_soup.find('span', class_='author')
                 author = author_tag.text.strip() if author_tag else 'Author tidak ditemukan'
 
-                tags_meta = isi_soup.find('meta', attrs={'name': 'keywords'})
-                tags = tags_meta['content'].strip() if tags_meta else 'Tag tidak ditemukan'
+            # 3. Tanggal (Prioritas Meta Tag)
+            tanggal_meta = isi_soup.find('meta', attrs={'name': 'dtk:publishdate'}) or isi_soup.find('meta', attrs={'property': 'article:published_time'})
+            if tanggal_meta and tanggal_meta.get('content'):
+                tanggal = tanggal_meta['content'].strip()
+            else:
+                tanggal_tag = isi_soup.find('div', class_='date') or isi_soup.find('time')
+                tanggal = tanggal_tag.text.strip() if tanggal_tag else 'Tanggal tidak ditemukan'
 
-                thumbnail_meta = isi_soup.find('meta', attrs={'property': 'og:image'})
-                thumbnail = thumbnail_meta['content'].strip() if thumbnail_meta else 'Thumbnail tidak ditemukan'
+            # 4. Tags
+            tags_meta = isi_soup.find('meta', attrs={'name': 'keywords'})
+            tags = tags_meta['content'].strip() if tags_meta else 'Tag tidak ditemukan'
 
-                body_content = isi_soup.find('div', class_='detail_text')
-                isi_berita = 'Isi tidak ditemukan'
+            # 5. Thumbnail
+            thumbnail_meta = isi_soup.find('meta', attrs={'property': 'og:image'})
+            thumbnail = thumbnail_meta['content'].strip() if thumbnail_meta else 'Thumbnail tidak ditemukan'
+
+            # 6. Isi Berita (Pembersihan Lanjutan & Strategi 3 Lapis)
+            body_content = isi_soup.find('div', class_='detail_text') or isi_soup.find('div', class_='detail-text')
+            
+            # Jika bukan artikel reguler, coba cari wadah artikel video/foto
+            if not body_content:
+                body_content = isi_soup.find('div', class_='artikel-video') or isi_soup.find('article')
+
+            isi_berita = 'Isi tidak ditemukan'
+            
+            if body_content:
+                # Bersihkan elemen iklan, tabel, atau video iframe
+                for elemen_kotor in body_content.find_all(['script', 'style', 'table', 'div', 'iframe']):
+                    elemen_kotor.decompose()
+                    
+                # Lapis 1: Coba ambil dari tag <p>
+                isi_paragraf_list = [p.get_text(strip=True) for p in body_content.find_all('p') if p.get_text(strip=True)]
                 
-                if body_content:
-                    isi_paragraf_list = [p.get_text(strip=True) for p in body_content.find_all('p') if p.get_text(strip=True)]
-                    if isi_paragraf_list:
-                        isi_berita = ' '.join(isi_paragraf_list)
+                if isi_paragraf_list:
+                    isi_berita = ' '.join(isi_paragraf_list)
+                else:
+                    # Lapis 2: Jika tidak ada <p>, ambil seluruh teks mentah yang tersisa
+                    teks_mentah = body_content.get_text(separator=' ', strip=True)
+                    if teks_mentah:
+                        isi_berita = teks_mentah
+            
+            # Lapis 3: Jika masih kosong (misal khusus video tanpa teks), ambil Meta Description
+            if isi_berita == 'Isi tidak ditemukan' or len(isi_berita) < 20:
+                desc_meta = isi_soup.find('meta', attrs={'name': 'description'})
+                if desc_meta and desc_meta.get('content'):
+                    isi_berita = "(Ringkasan) " + desc_meta['content'].strip()
 
-                data_final = {
-                    'url': url,
-                    'judul': judul,
-                    'tanggal_publish': tanggal,
-                    'author': author,
-                    'tag_kategori': tags,
-                    'isi_berita': isi_berita,
-                    'thumbnail': thumbnail
-                }
+            # Menyusun Data
+            data_final = {
+                'url': url,
+                'judul': judul,
+                'tanggal_publish': tanggal,
+                'author': author,
+                'tag_kategori': tags,
+                'isi_berita': isi_berita,
+                'thumbnail': thumbnail
+            }
 
-                collections.insert_one(data_final)
-                print(f'✅ Tersimpan: {judul[:60]}...')
+            # Memasukkan ke DB
+            collections.insert_one(data_final)
+            print(f'✅ Tersimpan: {judul[:60]}...')
+            sukses_tersimpan += 1
 
-                time.sleep(random.uniform(1.0, 2.0)) 
+            # Jeda agar tidak terkena blokir
+            time.sleep(random.uniform(1.0, 2.5)) 
 
-            except Exception as e:
-                print(f'❌ Error pada {url}: {e}')
+        except Exception as e:
+            print(f'❌ Error pada saat ekstrak {url}: {e}')
 
-        page += 1
-
-    # Matikan robot setelah selesai bekerja
-    driver.quit()
-    print("\n--- Crawling Selesai! ---")
+    print(f"\n--- Crawling Selesai! Berhasil menyimpan {sukses_tersimpan} artikel baru. ---")
 
 if __name__ == "__main__":
-    crawl_cnbc_hybrid()
+    crawl_cnbc_hybrid_final()
