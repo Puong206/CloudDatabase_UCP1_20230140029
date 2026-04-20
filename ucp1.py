@@ -13,7 +13,6 @@ import re
 # ==========================================
 # 1. KONEKSI MONGODB
 # ==========================================
-# Pastikan Anda sudah melakukan Drop Collection di MongoDB Anda sebelum menjalankan ini
 client = MongoClient('mongodb+srv://aryabagas23:puong206@praktikum.jofjat5.mongodb.net/?appName=praktikum')
 collections = client['ucp1']['CNBCIndo']
 
