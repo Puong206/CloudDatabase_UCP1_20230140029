@@ -1,5 +1,6 @@
 MongoDB
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/1bf5c7e4-91dd-4012-b4c1-3fcff8a9e06a" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/4d267df4-3073-4379-abcc-f13f92e50a4c" />
+
 
 Task Scheduler
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/40eb4067-3b64-4fcd-959f-979e24032f04" />
